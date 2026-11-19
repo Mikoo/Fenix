@@ -21,18 +21,99 @@ def run(url: str, handler, logger, once: bool = False) -> None:
     Side Effects:
         Recibe mensajes, ejecuta el handler y cambia o confirma su recepción.
     Notes:
-        Completar I5-A antes de usar. El parseo debe ocurrir por mensaje para que
-        un JSON corrupto no termine el worker ni oculte los otros mensajes.
+        El parseo ocurre por mensaje para que un JSON corrupto no termine el
+        worker ni oculte los otros mensajes.
     """
-    # TODO I5-A: implementar el algoritmo de la sección 4 de la consigna.
-    # 1. Abrir un bucle; receive(url) queda en un try para fallos de transporte.
-    # 2. Para cada mensaje, definir el contexto message_id antes de json.loads.
-    # 3. Dentro del try por mensaje: decodificar JSON, exigir dict y llamar handler.
-    # 4. acknowledge solo si handler terminó y persistió todos sus pasos.
-    # 5. JSON/validación/negocio/red: registrar tipo seguro y llamar retry_later.
-    # 6. Un fallo del ACK también deja el evento disponible; handler es idempotente.
-    # 7. Nunca ACK en finally, ni borrar antes de notificar/persistir resultado.
-    # 8. Fallos del transporte o de retry_later: registrar y volver tras 2 segundos.
-    # 9. once termina tras una consulta; Ctrl+C sale y el main cierra el listener.
-    # 10. Los NotImplementedError deben propagarse: revelan que falta completar.
-    raise NotImplementedError("I5-A: implementar ciclo de vida del worker")
+    while True:
+        try:
+            messages = receive(url)
+        except (ClientError, BotoCoreError) as error:
+            logger.error(
+                "sqs_receive_error",
+                extra={"action": "receive", "status": type(error).__name__},
+            )
+            if once:
+                return
+            time.sleep(2)
+            continue
+
+        for message in messages:
+            message_id = message.get("MessageId")
+            receipt = message.get("ReceiptHandle")
+            event_id = None
+            resource_id = None
+            try:
+                raw_body = message.get("Body")
+                if not isinstance(raw_body, str):
+                    raise ValueError("Body ausente o no textual en mensaje SQS")
+                payload = json.loads(raw_body)
+                if not isinstance(payload, dict):
+                    raise ValueError("El payload del mensaje debe ser un objeto JSON")
+                raw_event_id = payload.get("event_id")
+                if isinstance(raw_event_id, str):
+                    event_id = raw_event_id
+                raw_resource_id = payload.get("resource_id")
+                if isinstance(raw_resource_id, str):
+                    resource_id = raw_resource_id
+                handler(payload)
+            except (
+                json.JSONDecodeError,
+                ProjectError,
+                ClientError,
+                BotoCoreError,
+                KeyError,
+                TypeError,
+                ValueError,
+            ) as error:
+                logger.error(
+                    "mensaje_fallido",
+                    extra={
+                        "event_id": event_id,
+                        "message_id": message_id,
+                        "resource_id": resource_id,
+                        "action": "retry_later",
+                        "status": type(error).__name__,
+                    },
+                )
+                try:
+                    retry_later(url, message)
+                except (ClientError, BotoCoreError) as retry_error:
+                    logger.error(
+                        "sqs_retry_error",
+                        extra={
+                            "event_id": event_id,
+                            "message_id": message_id,
+                            "resource_id": resource_id,
+                            "action": "retry_later",
+                            "status": type(retry_error).__name__,
+                        },
+                    )
+                    time.sleep(2)
+                continue
+
+            try:
+                acknowledge(url, receipt)
+                logger.info(
+                    "mensaje_procesado",
+                    extra={
+                        "event_id": event_id,
+                        "message_id": message_id,
+                        "resource_id": resource_id,
+                        "action": "acknowledge",
+                        "status": "ok",
+                    },
+                )
+            except (ClientError, BotoCoreError) as ack_error:
+                logger.error(
+                    "sqs_ack_error",
+                    extra={
+                        "event_id": event_id,
+                        "message_id": message_id,
+                        "resource_id": resource_id,
+                        "action": "acknowledge",
+                        "status": type(ack_error).__name__,
+                    },
+                )
+
+        if once:
+            return

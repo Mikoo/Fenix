@@ -198,12 +198,65 @@ def handle(event: dict) -> None:
         ValidationError: Si el evento fue inyectado a SQS y no es válido.
         RetryableError: Si la simulación o una dependencia temporal falla.
         PermanentError: Conflicto de event_id o recurso no autorizado.
-        NotImplementedError: Mientras falte completar el bloque del Rol 5.
     Side Effects:
         Actualiza recursos, data/events.json y el canal de comunicación.
     Notes:
         Un solo proceso modifica el ledger. Un timeout al notificar puede
         repetir un aviso: no hay transacción común entre JSON, AWS y red.
     """
-    _ = (event, load, save, validate, notify)  # Reservado para Rol 5 (I5-B).
-    raise NotImplementedError("I5-B: integrar etapas y ledger durable")
+    inventory_path = "data/inventory.json"
+    events_path = "data/events.json"
+
+    inventory = load(inventory_path)
+    clean = validate(event, inventory)
+    event_id = clean["event_id"]
+    resource_id = clean["resource_id"]
+    event_type = clean["event_type"]
+    simulate_failures = clean.get("simulate_failures", 0)
+
+    ledger = load(events_path)
+    if not isinstance(ledger, dict):
+        raise PermanentError("El registro persistente de eventos es inválido")
+
+    entry = ledger.get(event_id)
+    if entry is not None:
+        if entry.get("event") != clean:
+            raise PermanentError(f"Conflicto de payload para event_id {event_id}")
+        if entry.get("repair_done") and entry.get("notified"):
+            return
+    else:
+        entry = {
+            "event": clean,
+            "attempts": 0,
+            "repair_done": False,
+            "repair_status": None,
+            "notified": False,
+        }
+        ledger[event_id] = entry
+
+    entry["attempts"] = int(entry.get("attempts", 0)) + 1
+    save(events_path, ledger)
+
+    if entry["attempts"] <= simulate_failures:
+        raise RetryableError(
+            f"Fallo simulado en intento {entry['attempts']} de {simulate_failures}"
+        )
+
+    if not entry.get("repair_done"):
+        resource = inventory.get(resource_id)
+        if not isinstance(resource, dict):
+            raise PermanentError(f"Recurso no autorizado en inventario: {resource_id}")
+        repair_status = repair(resource, event_type)
+        entry["repair_done"] = True
+        entry["repair_status"] = repair_status
+        save(events_path, ledger)
+
+    if not entry.get("notified"):
+        status_label = entry.get("repair_status") or "ok"
+        summary = (
+            f"[Fenix] event_id={event_id} resource_id={resource_id} "
+            f"event_type={event_type} status={status_label}"
+        )
+        notify(summary[:1000])
+        entry["notified"] = True
+        save(events_path, ledger)
