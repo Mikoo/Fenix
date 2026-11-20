@@ -9,17 +9,17 @@ def signature(secret: str, timestamp: int, body: bytes) -> str:
     """Firma exactamente timestamp, punto y cuerpo binario original.
 
     Args:
-        secret: Secreto compartido de al menos 16 caracteres, del entorno.
+        secret: Secreto compartido de 16 a 256 caracteres, del entorno.
         timestamp: Unix epoch en segundos, igual al enviado en la cabecera.
         body: Bytes exactos enviados por HTTP; no reserializar el JSON.
     Returns:
         HMAC-SHA256 hexadecimal de 64 caracteres.
     Raises:
-        ValidationError: Si el secreto es demasiado corto.
+        ValidationError: Si el secreto o los parámetros están fuera de rango.
     """
-    if not isinstance(secret, str) or len(secret) < 16:  # Valida longitud.
+    if not isinstance(secret, str) or not 16 <= len(secret) <= 256:  # Rango.
         raise ValidationError(
-            "Configurar WEBHOOK_SECRET de 16 caracteres o más"
+            "Configurar WEBHOOK_SECRET entre 16 y 256 caracteres"
         )
     if (
         isinstance(timestamp, bool)
@@ -49,7 +49,11 @@ def verify(
         La ventana de tiempo mitiga replay antiguo. No impide repetir un evento
         válido dentro de la ventana; event_id e idempotencia cubren ese caso.
     """
-    if not isinstance(header, str) or not isinstance(body, bytes):  # Tipos.
+    if (
+        not isinstance(header, str)
+        or not 68 <= len(header) <= 128
+        or not isinstance(body, bytes)
+    ):  # Acota tipos y longitud máxima de cabecera contra DoS en memoria.
         raise ValidationError("Cabecera o cuerpo de firma inválidos")
     parts = header.split(",")  # Separa exactamente los dos campos del header.
     if len(parts) != 2:  # Exige t y v1 una sola vez, sin comas sobrantes.
@@ -68,6 +72,8 @@ def verify(
     if not raw_ts.isascii() or not raw_ts.isdigit():  # Solo dígitos enteros.
         raise ValidationError("Timestamp de firma no entero")
     timestamp = int(raw_ts)  # Convierte epoch validado a entero.
+    if timestamp <= 0 or str(timestamp) != raw_ts:  # Bloquea ceros a la izq.
+        raise ValidationError("Timestamp de firma ambiguo o no positivo")
     hex_chars = "0123456789abcdef"  # Conjunto hexadecimal en minúsculas.
     if len(digest) != 64 or any(c not in hex_chars for c in digest):  # 64 hex.
         raise ValidationError("Formato hexadecimal v1 inválido")
