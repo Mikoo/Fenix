@@ -1,7 +1,10 @@
 """Laboratorio acotado de recursos. Integrante 2 prepara, integrante 6 verifica."""
+import time
+
 from fenix.config.settings import client
 from fenix.utils.state import load, save
 from fenix.utils.validation import identifier
+from fenix.utils.errors import ValidationError, PermanentError
 
 
 def setup_demo(group: str) -> dict:
@@ -143,8 +146,38 @@ def inject_fault(alias: str) -> None:
     Side Effects:
         Modifica únicamente el recurso de prueba de ese grupo.
     """
-    # TODO I6-A: resolver el alias en inventario; jamás recibir InstanceId libre.
-    # node-01: stop_instances y comprobar stopped, con consultas limitadas.
-    # bucket-01: quitar Owner conservando el resto de etiquetas.
-    # Esta función fabrica el problema; no debe enviar el evento automáticamente.
-    raise NotImplementedError("I6-A: inyectar y comprobar fallo")
+    # Validación explícita del alias (defense in depth) además del inventario.
+    if alias not in ("node-01", "bucket-01"):
+        raise ValidationError(f"Alias no permitido: {alias}")
+
+    inventory = load("data/inventory.json")
+    if not isinstance(inventory, dict) or alias not in inventory:
+        raise ValidationError(f"Alias no presente en el inventario: {alias}")
+    resource = inventory[alias]
+    if not isinstance(resource, dict) or "id" not in resource:
+        raise ValidationError(f"Inventario inválido para {alias}")
+    resource_type = resource.get("type")
+    resource_id = resource["id"]
+
+    if alias == "node-01" and resource_type == "ec2":
+        ec2 = client("ec2")
+        ec2.stop_instances(InstanceIds=[resource_id])
+        for _ in range(10):
+            response = ec2.describe_instances(InstanceIds=[resource_id])
+            state = response["Reservations"][0]["Instances"][0]["State"]["Name"]
+            if state == "stopped":
+                return
+            time.sleep(1)
+        raise PermanentError("La instancia no llegó a stopped en el tiempo acotado")
+
+    if alias == "bucket-01" and resource_type == "s3":
+        s3 = client("s3")
+        tagging = s3.get_bucket_tagging(Bucket=resource_id)
+        current = tagging.get("TagSet", [])
+        new_tags = [tag for tag in current if tag.get("Key") != "Owner"]
+        if len(new_tags) == len(current):
+            raise PermanentError("La etiqueta Owner ya estaba ausente")
+        s3.put_bucket_tagging(Bucket=resource_id, Tagging={"TagSet": new_tags})
+        return
+
+    raise ValidationError(f"Alias o tipo de recurso no soportado: {alias}")
