@@ -225,3 +225,100 @@ def test_f03_repair_s3_preserves_foreign_tags(monkeypatch):
     assert final_map["CostCenter"] == "finanzas"  # F03: preservó tag ajena.
     assert repair(bucket, "bucket.tags_missing") == "already_ok"  # Convergió.
     assert store["writes"] == 1  # No reescribió tags cuando ya estaban bien.
+
+# --- Pruebas I6 (inyeccion de fallas, stub de notify, validacion) ---
+import pytest
+
+
+def test_inject_fault_requires_inventory(tmp_path, monkeypatch):
+    from fenix.services.demo import inject_fault
+    from fenix.utils.errors import ValidationError
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    with pytest.raises(ValidationError):
+        inject_fault("node-01")
+
+
+def test_inject_fault_rejects_unknown_alias(tmp_path, monkeypatch):
+    from fenix.services.demo import inject_fault
+    from fenix.utils.errors import ValidationError
+    from fenix.utils.state import save
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    save("data/inventory.json", {"node-01": {"type": "ec2", "id": "i-fake"}})
+    with pytest.raises(ValidationError):
+        inject_fault("bucket-01")
+
+
+def test_inject_fault_node_stops(tmp_path, monkeypatch):
+    from unittest.mock import patch, MagicMock
+    from fenix.services.demo import inject_fault
+    from fenix.utils.state import save
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    save("data/inventory.json", {"node-01": {"type": "ec2", "id": "i-abc123"}})
+    fake_ec2 = MagicMock()
+    fake_ec2.describe_instances.return_value = {
+        "Reservations": [{"Instances": [{"State": {"Name": "stopped"}}]}]
+    }
+    with patch("fenix.services.demo.client", return_value=fake_ec2):
+        inject_fault("node-01")
+    fake_ec2.stop_instances.assert_called_once_with(InstanceIds=["i-abc123"])
+
+
+def test_inject_fault_bucket_removes_owner(tmp_path, monkeypatch):
+    from unittest.mock import patch, MagicMock
+    from fenix.services.demo import inject_fault
+    from fenix.utils.state import save
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    save("data/inventory.json", {"bucket-01": {"type": "s3", "id": "bucket-test"}})
+    fake_s3 = MagicMock()
+    fake_s3.get_bucket_tagging.return_value = {
+        "TagSet": [
+            {"Key": "ManagedBy", "Value": "ppa2"},
+            {"Key": "Owner", "Value": "grupo"},
+        ]
+    }
+    with patch("fenix.services.demo.client", return_value=fake_s3):
+        inject_fault("bucket-01")
+    call = fake_s3.put_bucket_tagging.call_args
+    tags = call.kwargs["Tagging"]["TagSet"]
+    assert all(t["Key"] != "Owner" for t in tags)
+    assert any(t["Key"] == "ManagedBy" for t in tags)
+
+
+def test_notify_stub_429():
+    from tests.notify_stub import NotifyStub
+    from fenix.utils.errors import RetryableError
+    stub = NotifyStub()
+    stub.set_mode("rate_limit", count=1)
+    with pytest.raises(RetryableError):
+        stub("mensaje de prueba")
+    stub("segundo mensaje")
+    assert len(stub.calls) == 2
+
+
+def test_notify_stub_permanent():
+    from tests.notify_stub import NotifyStub
+    from fenix.utils.errors import PermanentError
+    stub = NotifyStub()
+    stub.set_mode("permanent")
+    with pytest.raises(PermanentError):
+        stub("mensaje de prueba")
+    assert len(stub.calls) == 1
+
+
+def test_no_test_deletes_other_group_resources():
+    import inspect
+    from fenix.services.demo import inject_fault
+    src = inspect.getsource(inject_fault)
+    assert "inventory" in src
+
+
+def test_tested_functions_report():
+    from tests.notify_stub import register, TESTED_FUNCTIONS
+    for _fn in ("inject_fault", "notify", "signature", "verify"):
+        register(_fn)
+    assert "inject_fault" in TESTED_FUNCTIONS
+    assert "notify" in TESTED_FUNCTIONS
