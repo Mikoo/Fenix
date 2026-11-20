@@ -6,33 +6,144 @@ from fenix.services.sqs import receive, acknowledge, retry_later
 from fenix.utils.errors import ProjectError
 
 
+def _extract_attempt(message: dict) -> int:
+    """Obtiene el número de intento actual de forma segura (default 1)."""
+    attrs = message.get("Attributes")
+    if not isinstance(attrs, dict):
+        return 1
+    raw_count = attrs.get("ApproximateReceiveCount", 1)
+    if isinstance(raw_count, bool):
+        return 1
+    try:
+        attempt = int(raw_count)
+    except (TypeError, ValueError):
+        return 1
+    return attempt if attempt >= 1 else 1
+
+
+def _handle_retry(
+    url: str,
+    message: dict,
+    logger,
+    context: dict,
+) -> None:
+    """Programa el reintento en SQS aislando fallos del broker o atributos."""
+    try:
+        retry_later(url, message)
+    except (
+        ClientError,
+        BotoCoreError,
+        ProjectError,
+        KeyError,
+        ValueError,
+        TypeError,
+        OSError,
+    ) as retry_error:
+        logger.error(
+            "sqs_retry_error",
+            extra={
+                **context,
+                "action": "retry_later",
+                "status": type(retry_error).__name__,
+            },
+        )
+        time.sleep(2)
+
+
+def _process_message(url: str, message: dict, handler, logger) -> None:
+    """Procesa un mensaje SQS individual preservando correlación y ACK."""
+    context = {
+        "event_id": None,
+        "message_id": message.get("MessageId"),
+        "resource_id": None,
+        "attempt": _extract_attempt(message),
+    }
+    try:
+        raw_body = message.get("Body")
+        if not isinstance(raw_body, str):
+            raise ValueError("Body ausente o no textual en mensaje SQS")
+        payload = json.loads(raw_body)
+        if not isinstance(payload, dict):
+            raise ValueError("El payload debe ser un objeto JSON")
+        if isinstance(payload.get("event_id"), str):
+            context["event_id"] = payload["event_id"]
+        if isinstance(payload.get("resource_id"), str):
+            context["resource_id"] = payload["resource_id"]
+        handler(payload)
+    except (
+        json.JSONDecodeError,
+        ProjectError,
+        ClientError,
+        BotoCoreError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as error:
+        logger.error(
+            "mensaje_fallido",
+            extra={
+                **context,
+                "action": "retry_later",
+                "status": type(error).__name__,
+            },
+        )
+        _handle_retry(url, message, logger, context)
+        return
+
+    try:
+        acknowledge(url, message.get("ReceiptHandle"))
+        logger.info(
+            "mensaje_procesado",
+            extra={
+                **context,
+                "action": "acknowledge",
+                "status": "acknowledged",
+            },
+        )
+    except (ClientError, BotoCoreError) as ack_error:
+        logger.error(
+            "sqs_ack_error",
+            extra={
+                **context,
+                "action": "acknowledge",
+                "status": type(ack_error).__name__,
+            },
+        )
+
+
 def run(url: str, handler, logger, once: bool = False) -> None:
     """Consume mensajes y confirma únicamente resultados durables.
 
     Args:
         url: URL de la cola de trabajo, obtenida por get_queue_url.
-        handler: Callable handler(event) que revalida y ejecuta el caso de negocio.
+        handler: Callable handler(event) que revalida y ejecuta negocio.
         logger: Logger JSON del proceso worker.
-        once: Si es True, realiza una sola consulta y termina; útil para pruebas.
+        once: Si es True, realiza una sola consulta y termina.
     Returns:
         None al terminar la consulta única o al detenerse mediante Ctrl+C.
     Raises:
-        NotImplementedError: Si todavía no se completaron las plantillas del alumno.
+        NotImplementedError: Si falta completar una plantilla dependiente.
     Side Effects:
-        Recibe mensajes, ejecuta el handler y cambia o confirma su recepción.
+        Recibe mensajes, ejecuta el handler y cambia o confirma recepción.
     Notes:
-        Completar I5-A antes de usar. El parseo debe ocurrir por mensaje para que
-        un JSON corrupto no termine el worker ni oculte los otros mensajes.
+        El parseo ocurre por mensaje para que un JSON corrupto no termine
+        el worker ni oculte los otros mensajes.
     """
-    # TODO I5-A: implementar el algoritmo de la sección 4 de la consigna.
-    # 1. Abrir un bucle; receive(url) queda en un try para fallos de transporte.
-    # 2. Para cada mensaje, definir el contexto message_id antes de json.loads.
-    # 3. Dentro del try por mensaje: decodificar JSON, exigir dict y llamar handler.
-    # 4. acknowledge solo si handler terminó y persistió todos sus pasos.
-    # 5. JSON/validación/negocio/red: registrar tipo seguro y llamar retry_later.
-    # 6. Un fallo del ACK también deja el evento disponible; handler es idempotente.
-    # 7. Nunca ACK en finally, ni borrar antes de notificar/persistir resultado.
-    # 8. Fallos del transporte o de retry_later: registrar y volver tras 2 segundos.
-    # 9. once termina tras una consulta; Ctrl+C sale y el main cierra el listener.
-    # 10. Los NotImplementedError deben propagarse: revelan que falta completar.
-    raise NotImplementedError("I5-A: implementar ciclo de vida del worker")
+    while True:
+        try:
+            messages = receive(url)
+        except (ClientError, BotoCoreError) as error:
+            logger.error(
+                "sqs_receive_error",
+                extra={"action": "receive", "status": type(error).__name__},
+            )
+            if once:
+                return
+            time.sleep(2)
+            continue
+
+        for message in messages:
+            _process_message(url, message, handler, logger)
+
+        if once:
+            return
