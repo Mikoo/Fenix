@@ -14,14 +14,14 @@
 
 ## 2. Integrantes y Asignacion de Roles
 
-| Rol | Integrante | Modulos Asignados (`src/fenix/` y `tests/`) | Pruebas y Evidencia Defendidas | Estado |
-| :--- | :--- | :--- | :--- | :--- |
-| **Rol 1 (I1):** Entradas y Excepciones | **Isasmendi, Leonel** | `utils/errors.py`<br>`utils/validation.py`<br>`services/events.py` | Contratos `identifier`, `ttl_seconds`, `utc_text`, `events.validate` (`F06`, `F07`) | Asignado |
-| **Rol 2 (I2):** Mensajeria e Inventario Cloud | **Isella, Lucia Daniza** | `config/settings.py`<br>`services/sqs.py`<br>`services/demo.py` (`setup_demo`) | Colas SQS/DLQ (`ensure_queues`, `retry_later`) e inventario idempotente (`F01`, `F08`, `F10`) | Asignado |
-| **Rol 3 (I3):** Webhooks y Reparacion | **Ahumada, German Maximiliano Leonel** | `utils/crypto.py`<br>`services/receiver.py`<br>`services/remediation.py` (`repair`) | Verificacion HMAC (`verify`), receptor FastAPI (`POST /webhook`) y reparacion EC2/S3 (`F02`, `F03`, `F04`, `F05`, `F13`) | Completado |
-| **Rol 4 (I4):** Observabilidad y Comunicacion | **Vaca, Georgina Zulma** | `utils/logging_json.py`<br>`services/notifications.py` (`notify`) | Telemetria JSON asincrona (`QueueHandler`/`QueueListener`), rotacion `.gz` y Bot Telegram (`F14`, `F16`) | Asignado |
-| **Rol 5 (I5):** Integracion y Worker | **Sosa, Tamara Gabriela** | `services/worker.py`<br>`services/remediation.py` (`handle`)<br>`cli.py` | Worker secuencial, registro por etapas (`data/events.json`), conflictos y corte intermedio (`F09`, `F11`, `F12`, `F15`) | Asignado |
-| **Rol 6 (I6):** Pruebas y Diagnostico | **Paz Villarreal, Sebastian** | `services/demo.py` (`inject_fault`)<br>`tests/test_scenarios.py`<br>`tests/test_fenix.py` | Inyeccion de fallas (`fault`), stub de `notify` y matriz integral con DLQ (`F01`–`F16`) | Asignado |
+| Rol | Integrante | Modulos Asignados (`src/fenix/` y `tests/`) | Pruebas y Evidencia Defendidas |
+| :--- | :--- | :--- | :--- |
+| **Rol 1 (I1):** Entradas y Excepciones | **Isasmendi, Leonel** | `utils/errors.py`<br>`utils/validation.py`<br>`services/events.py` | Contratos `identifier`, `ttl_seconds`, `utc_text`, `events.validate` (`F06`, `F07`) |
+| **Rol 2 (I2):** Mensajeria e Inventario Cloud | **Isella, Lucia Daniza** | `config/settings.py`<br>`services/sqs.py`<br>`services/demo.py` (`setup_demo`) | Colas SQS/DLQ (`ensure_queues`, `retry_later`) e inventario idempotente (`F01`, `F08`, `F10`) |
+| **Rol 3 (I3):** Webhooks y Reparacion | **Ahumada, German Maximiliano Leonel** | `utils/crypto.py`<br>`services/receiver.py`<br>`services/remediation.py` (`repair`) | Verificacion HMAC (`verify`), receptor FastAPI (`POST /webhook`) y reparacion EC2/S3 (`F02`, `F03`, `F04`, `F05`, `F13`) |
+| **Rol 4 (I4):** Observabilidad y Comunicacion | **Vaca, Georgina Zulma** | `utils/logging_json.py`<br>`services/notifications.py` (`notify`) | Telemetria JSON asincrona (`QueueHandler`/`QueueListener`), rotacion `.gz` y Bot Telegram (`F14`, `F16`) |
+| **Rol 5 (I5):** Integracion y Worker | **Sosa, Tamara Gabriela** | `services/worker.py`<br>`services/remediation.py` (`handle`)<br>`cli.py` | Worker secuencial, registro por etapas (`data/events.json`), conflictos y corte intermedio (`F09`, `F11`, `F12`, `F15`) |
+| **Rol 6 (I6):** Pruebas y Diagnostico | **Paz Villarreal, Sebastian** | `services/demo.py` (`inject_fault`)<br>`tests/test_scenarios.py`<br>`tests/test_fenix.py` | Inyeccion de fallas (`fault`), stub de `notify` y matriz integral con DLQ (`F01`–`F16`) |
 
 **Integrantes del equipo:**
 - Ahumada, German Maximiliano Leonel
