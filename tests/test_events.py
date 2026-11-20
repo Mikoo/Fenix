@@ -9,11 +9,11 @@ from fenix.utils.errors import ValidationError
 def inventory():
     return {
         "node-01": {
-            "type": "instance",
+            "type": "ec2",
             "id": "i-123456"
         },
         "bucket-01": {
-            "type": "bucket",
+            "type": "s3",
             "id": "fenix-demo"
         }
     }

@@ -43,8 +43,8 @@ def validate(event: dict, inventory: dict) -> dict:
     event_type = event["event_type"]
 
     allowed_types = {
-        "instance.stopped": "instance",
-        "bucket.tags_missing": "bucket"
+       "instance.stopped": "ec2",
+       "bucket.tags_missing": "s3"
     }
 
     if not isinstance(event_type, str) or event_type not in allowed_types:
