@@ -1,0 +1,52 @@
+{
+  "ec2": {
+    "InstanceId": "i-8d6a04c99e5f62288",
+    "State": {
+      "Code": 16,
+      "Name": "running"
+    },
+    "Tags": [
+      {
+        "Key": "Name",
+        "Value": "fenix-grupo01-node-01"
+      },
+      {
+        "Key": "ManagedBy",
+        "Value": "ppa2"
+      },
+      {
+        "Key": "Project",
+        "Value": "fenix"
+      },
+      {
+        "Key": "GroupId",
+        "Value": "grupo01"
+      },
+      {
+        "Key": "Owner",
+        "Value": "grupo01"
+      }
+    ]
+  },
+  "s3": {
+    "Bucket": "fenix-grupo01-demo",
+    "TagSet": [
+      {
+        "Key": "ManagedBy",
+        "Value": "ppa2"
+      },
+      {
+        "Key": "Project",
+        "Value": "fenix"
+      },
+      {
+        "Key": "GroupId",
+        "Value": "grupo01"
+      },
+      {
+        "Key": "Owner",
+        "Value": "grupo01"
+      }
+    ]
+  }
+}

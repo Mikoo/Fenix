@@ -1,0 +1,14 @@
+[
+  {
+    "QueueName": "fenix-grupo01-dlq",
+    "MessageId": "6f4e9c6e-82ce-4652-a0be-7d270f5ba860",
+    "Body": "{json_corrupto_f08",
+    "Attributes": {
+      "SenderId": "000000000000",
+      "SentTimestamp": "1795242910452",
+      "ApproximateReceiveCount": "4",
+      "DeadLetterQueueSourceArn": "arn:aws:sqs:us-east-1:000000000000:fenix-grupo01-events",
+      "ApproximateFirstReceiveTimestamp": "1795242947628"
+    }
+  }
+]

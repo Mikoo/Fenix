@@ -1,0 +1,50 @@
+{
+  "evt-node-001": {
+    "event": {
+      "schema_version": 1,
+      "event_id": "evt-node-001",
+      "event_type": "instance.stopped",
+      "resource_id": "node-01",
+      "occurred_at": "2026-10-22T18:00:00Z",
+      "simulate_failures": 0
+    },
+    "attempts": 1,
+    "status": "completed",
+    "repair_done": true,
+    "repair_result": "repaired",
+    "repair_status": "repaired",
+    "notified": true
+  },
+  "evt-bucket-001": {
+    "event": {
+      "schema_version": 1,
+      "event_id": "evt-bucket-001",
+      "event_type": "bucket.tags_missing",
+      "resource_id": "bucket-01",
+      "occurred_at": "2026-10-22T18:00:00Z",
+      "simulate_failures": 0
+    },
+    "attempts": 1,
+    "status": "completed",
+    "repair_done": true,
+    "repair_result": "repaired",
+    "repair_status": "repaired",
+    "notified": true
+  },
+  "evt-backoff-001": {
+    "event": {
+      "schema_version": 1,
+      "event_id": "evt-backoff-001",
+      "event_type": "instance.stopped",
+      "resource_id": "node-01",
+      "occurred_at": "2026-10-22T18:00:00Z",
+      "simulate_failures": 2
+    },
+    "attempts": 3,
+    "status": "completed",
+    "repair_done": true,
+    "repair_result": "already_ok",
+    "repair_status": "already_ok",
+    "notified": true
+  }
+}
