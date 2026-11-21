@@ -61,10 +61,14 @@ Fenix/
 │       │   └── validation.py     # Validadores identifier, ttl_seconds y utc_text [I1]
 │       └── cli.py                # Punto de entrada CLI (init-queues, setup-demo, fault, send, worker) [I5]
 ├── tests/
-│   ├── test_base.py              # Pruebas operativas del codigo de apoyo entregado
+│   ├── notify_stub.py            # Stub de notificaciones para simular 429 y errores 4xx [I6]
+│   ├── test_base.py              # Pruebas operativas, logging JSON UTC y notificaciones [I4]
 │   ├── test_contracts.py         # Pruebas de contratos de validacion [I1]
-│   ├── test_fenix.py             # Pruebas de HMAC, receptor HTTP y reparacion convergente [I3 / I6]
-│   └── test_scenarios.py         # Pruebas de idempotencia, orden de ACK y redrive a DLQ [I6]
+│   ├── test_event_conflicts.py   # Pruebas de conflictos y persistencia de event_id [I1]
+│   ├── test_events.py            # Pruebas de esquema cerrado y aliases permitidos [I1]
+│   ├── test_fenix.py             # Pruebas de HMAC, receptor HTTP, EC2/S3 e inject_fault [I3 / I6]
+│   ├── test_scenarios.py         # Pruebas de idempotencia, orden de ACK y redrive a DLQ [I6]
+│   └── test_worker_unit.py       # Pruebas unitarias de worker y ledger por etapas [I5]
 ├── evidencias/                   # Copias anonimizadas de logs, gzip, estado Boto3, DLQ y aviso Telegram
 ├── .env.example                  # Plantilla publica de variables de entorno sin secretos
 ├── .gitignore                    # Exclusion de .env, .venv/, logs/, data/ y caches
@@ -265,22 +269,22 @@ Esquema JSON cerrado (los 6 campos son obligatorios, no se admiten claves adicio
 
 | ID | Caso y Preparacion | Comando / Test `pytest` | Resultado Esperado | Resultado Observado | Evidencia | Responsable |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **F01** | `init-queues` y `setup-demo` dos veces | `python -m fenix.cli init-queues` / `setup-demo` | Mismas colas y recursos; sin duplicados | Pendiente integracion | `evidencias/01_inventory_generado.json` | I2 |
-| **F02** | Nodo detenido, evento firmado valido | `pytest tests/test_fenix.py -k f02` + LocalStack | `running` verificado, ledger completo, aviso y ACK | PASSED (Unitario) / Pendiente integracion | `evidencias/06_verificacion_boto3_ec2_s3.json` | I3 |
-| **F03** | Bucket sin `Owner` y con tag ajena | `pytest tests/test_fenix.py -k f03` + LocalStack | Tags restauradas y etiquetas ajenas preservadas | PASSED (Unitario) / Pendiente integracion | `evidencias/06_verificacion_boto3_ec2_s3.json` | I3 |
+| **F01** | `init-queues` y `setup-demo` dos veces | `python -m fenix.cli init-queues` / `setup-demo` | Mismas colas y recursos; sin duplicados | PASSED (LocalStack verificado) | `evidencias/01_inventory_generado.json` | I2 |
+| **F02** | Nodo detenido, evento firmado valido | `pytest tests/test_fenix.py -k f02` + LocalStack | `running` verificado, ledger completo, aviso y ACK | PASSED (Unitario + LocalStack) | `evidencias/06_verificacion_boto3_ec2_s3.json` | I3 |
+| **F03** | Bucket sin `Owner` y con tag ajena | `pytest tests/test_fenix.py -k f03` + LocalStack | Tags restauradas y etiquetas ajenas preservadas | PASSED (Unitario + LocalStack) | `evidencias/06_verificacion_boto3_ec2_s3.json` | I3 |
 | **F04** | Firma ausente/alterada y timestamp de hace 1 h | `pytest tests/test_fenix.py -k f04` | HTTP `401` y `0` mensajes en SQS | PASSED (`401`, `0` publicados) | `tests/test_fenix.py` | I3 |
 | **F05** | Mismos datos JSON con bytes distintos tras firmar | `pytest tests/test_fenix.py -k f05` | HTTP `401` por HMAC invalida | PASSED (`401` verificado) | `tests/test_fenix.py` | I3 |
 | **F06** | JSON roto firmado; luego lista JSON `[]` firmada | `pytest tests/test_fenix.py -k f06` | HTTP `400` y `422` respectivamente; sin publicar | PASSED (`400` y `422`) | `tests/test_fenix.py` | I1 / I3 |
-| **F07** | Alias ajeno y claves extra en el evento | `pytest tests/test_contracts.py` | `ValidationError` / `422`; ningun cambio cloud | Pendiente I1 | `tests/test_contracts.py` | I1 |
-| **F08** | Evento directo a SQS con JSON corrupto | `pytest -m integracion` | Worker sigue vivo; mensaje termina en DLQ | Pendiente I2/I6 | `evidencias/07_mensaje_leido_de_dlq.json` | I2 / I6 |
-| **F09** | `simulate_failures=2` con ID nuevo | `pytest tests/test_scenarios.py` | Backoff 2 s y 4 s; intento 3 repara y hace ACK | Pendiente I5 | `evidencias/04_log_fallo_y_backoff.jsonl` | I5 |
-| **F10** | Falla persistente (`simulate_failures=5`) | `pytest -m integracion` | Sin ACK; derivacion automatica a DLQ | Pendiente I2/I6 | `evidencias/07_mensaje_leido_de_dlq.json` | I2 / I6 |
-| **F11** | Repetir evento ya completo; reiniciar worker | `pytest tests/test_scenarios.py` | Sin nueva reparacion ni aviso repetido | Pendiente I5/I6 | `evidencias/02_events_ledger_completo.json` | I5 |
-| **F12** | Corte tras `repair_done` y antes de `notify` | `pytest tests/test_scenarios.py` | Reinicio recupera solo aviso pendiente | Pendiente I5 | `evidencias/02_events_ledger_completo.json` | I5 |
+| **F07** | Alias ajeno y claves extra en el evento | `pytest tests/test_contracts.py tests/test_events.py` | `ValidationError` / `422`; ningun cambio cloud | PASSED (Contratos + Eventos) | `tests/test_contracts.py`, `tests/test_events.py` | I1 |
+| **F08** | Evento directo a SQS con JSON corrupto | `pytest -m integracion` + DLQ LocalStack | Worker sigue vivo; mensaje termina en DLQ | PASSED (LocalStack DLQ) | `evidencias/07_mensaje_leido_de_dlq.json` | I2 / I6 |
+| **F09** | `simulate_failures=2` con ID nuevo | `pytest tests/test_worker_unit.py` + LocalStack | Backoff 2 s y 4 s; intento 3 repara y hace ACK | PASSED (Unitario + LocalStack) | `evidencias/04_log_fallo_y_backoff.jsonl` | I5 |
+| **F10** | Falla persistente (`simulate_failures=5`) | `pytest -m integracion` | Sin ACK; derivacion automatica a DLQ | PASSED (`test_redrive_with_localstack`) | `tests/test_scenarios.py`, `evidencias/08_pytest_integracion.txt` | I2 / I6 |
+| **F11** | Repetir evento ya completo; reiniciar worker | `pytest tests/test_scenarios.py tests/test_worker_unit.py` | Sin nueva reparacion ni aviso repetido | PASSED (Idempotencia durable) | `evidencias/02_events_ledger_completo.json` | I5 |
+| **F12** | Corte tras `repair_done` y antes de `notify` | `pytest tests/test_worker_unit.py` | Reinicio recupera solo aviso pendiente | PASSED (Ledger por etapas) | `tests/test_worker_unit.py`, `evidencias/08_pytest_integracion.txt` | I5 |
 | **F13** | SQS detenido al recibir webhook | `pytest tests/test_fenix.py -k f13` | HTTP `503`; no hay aceptacion falsa | PASSED (`503` verificado) | `tests/test_fenix.py` | I3 |
-| **F14** | Mock de aviso `429`/timeout y luego exito | `pytest tests/test_scenarios.py` | Reparacion no se repite; aviso reintentado | Pendiente I4/I6 | `evidencias/03_log_nominal.jsonl` | I4 / I6 |
-| **F15** | Cambiar payload conservando `event_id` | `pytest tests/test_scenarios.py` | Conflicto (`PermanentError`); no altera ledger original | Pendiente I5 | `evidencias/04_log_fallo_y_backoff.jsonl` | I5 |
-| **F16** | Forzar rotacion, abrir `.gz` y parsear lineas | `pytest tests/test_base.py` / `test_scenarios.py` | JSON valido, UTC `+00:00` y cero secretos | Pendiente I4 | `evidencias/05_historico_rotado.jsonl.gz` | I4 |
+| **F14** | Mock de aviso `429`/timeout y luego exito | `pytest tests/test_base.py tests/test_fenix.py` + Telegram | Reparacion no se repite; aviso reintentado | PASSED (Unitario + Telegram real) | `evidencias/03_log_nominal.jsonl` | I4 / I6 |
+| **F15** | Cambiar payload conservando `event_id` | `pytest tests/test_event_conflicts.py tests/test_worker_unit.py` | Conflicto (`PermanentError`); no altera ledger original | PASSED (Conflicto detectado) | `tests/test_event_conflicts.py`, `tests/test_worker_unit.py` | I5 |
+| **F16** | Forzar rotacion, abrir `.gz` y parsear lineas | `pytest tests/test_base.py` + rotacion real | JSON valido, UTC `+00:00` y cero secretos | PASSED (Gzip + UTC `+00:00`) | `evidencias/05_historico_rotado.jsonl.gz` | I4 |
 
 ---
 
