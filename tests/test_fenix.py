@@ -1,9 +1,13 @@
 """Pruebas del Rol 3 (HMAC, Receptor HTTP y Reparación Convergente EC2/S3)."""
 import asyncio  # Ejecuta peticiones ASGI hacia FastAPI sin abrir puertos.
+import inspect  # Verifica restricciones estáticas de alcance en inject_fault.
 import time  # Genera timestamps dentro y fuera de la ventana de 300 s.
+from unittest.mock import MagicMock, patch  # Simula clientes Boto3 en I6.
 from botocore.exceptions import ClientError  # Simula caída o error de AWS.
 import httpx  # Cliente ASGI oficial listado en requirements.txt.
 import pytest  # Ejecuta aserciones y verificación de excepciones.
+from notify_stub import TESTED_FUNCTIONS, NotifyStub, register  # Stub I6.
+from fenix.services.demo import inject_fault  # Inyección de fallos I6-A.
 from fenix.services.receiver import app  # Aplicación HTTP del receptor Fénix.
 from fenix.services.remediation import repair  # Motor convergente EC2 y S3.
 from fenix.utils.crypto import signature, verify  # Primitivas HMAC-SHA256.
@@ -12,6 +16,7 @@ from fenix.utils.errors import (  # Excepciones públicas del dominio.
     RetryableError,
     ValidationError,
 )
+from fenix.utils.state import save  # Persistencia de inventarios de prueba.
 
 
 def _post_webhook(
@@ -226,13 +231,9 @@ def test_f03_repair_s3_preserves_foreign_tags(monkeypatch):
     assert repair(bucket, "bucket.tags_missing") == "already_ok"  # Convergió.
     assert store["writes"] == 1  # No reescribió tags cuando ya estaban bien.
 
-# --- Pruebas I6 (inyeccion de fallas, stub de notify, validacion) ---
-import pytest
-
 
 def test_inject_fault_requires_inventory(tmp_path, monkeypatch):
-    from fenix.services.demo import inject_fault
-    from fenix.utils.errors import ValidationError
+    """Exige existencia de inventario local antes de inyectar fallos."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "data").mkdir()
     with pytest.raises(ValidationError):
@@ -240,9 +241,7 @@ def test_inject_fault_requires_inventory(tmp_path, monkeypatch):
 
 
 def test_inject_fault_rejects_unknown_alias(tmp_path, monkeypatch):
-    from fenix.services.demo import inject_fault
-    from fenix.utils.errors import ValidationError
-    from fenix.utils.state import save
+    """Rechaza aliases que no figuren autorizados en data/inventory.json."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "data").mkdir()
     save("data/inventory.json", {"node-01": {"type": "ec2", "id": "i-fake"}})
@@ -251,9 +250,7 @@ def test_inject_fault_rejects_unknown_alias(tmp_path, monkeypatch):
 
 
 def test_inject_fault_node_stops(tmp_path, monkeypatch):
-    from unittest.mock import patch, MagicMock
-    from fenix.services.demo import inject_fault
-    from fenix.utils.state import save
+    """Detiene node-01 mediante stop_instances y comprueba estado stopped."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "data").mkdir()
     save("data/inventory.json", {"node-01": {"type": "ec2", "id": "i-abc123"}})
@@ -267,12 +264,13 @@ def test_inject_fault_node_stops(tmp_path, monkeypatch):
 
 
 def test_inject_fault_bucket_removes_owner(tmp_path, monkeypatch):
-    from unittest.mock import patch, MagicMock
-    from fenix.services.demo import inject_fault
-    from fenix.utils.state import save
+    """Elimina la etiqueta Owner del bucket conservando el resto de tags."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "data").mkdir()
-    save("data/inventory.json", {"bucket-01": {"type": "s3", "id": "bucket-test"}})
+    save(
+        "data/inventory.json",
+        {"bucket-01": {"type": "s3", "id": "bucket-test"}},
+    )
     fake_s3 = MagicMock()
     fake_s3.get_bucket_tagging.return_value = {
         "TagSet": [
@@ -284,13 +282,12 @@ def test_inject_fault_bucket_removes_owner(tmp_path, monkeypatch):
         inject_fault("bucket-01")
     call = fake_s3.put_bucket_tagging.call_args
     tags = call.kwargs["Tagging"]["TagSet"]
-    assert all(t["Key"] != "Owner" for t in tags)
-    assert any(t["Key"] == "ManagedBy" for t in tags)
+    assert all(tag["Key"] != "Owner" for tag in tags)
+    assert any(tag["Key"] == "ManagedBy" for tag in tags)
 
 
 def test_notify_stub_429():
-    from tests.notify_stub import NotifyStub
-    from fenix.utils.errors import RetryableError
+    """Simula error transitorio 429 en NotifyStub y recuperacion posterior."""
     stub = NotifyStub()
     stub.set_mode("rate_limit", count=1)
     with pytest.raises(RetryableError):
@@ -300,8 +297,7 @@ def test_notify_stub_429():
 
 
 def test_notify_stub_permanent():
-    from tests.notify_stub import NotifyStub
-    from fenix.utils.errors import PermanentError
+    """Simula fallo permanente 4xx en NotifyStub."""
     stub = NotifyStub()
     stub.set_mode("permanent")
     with pytest.raises(PermanentError):
@@ -310,15 +306,14 @@ def test_notify_stub_permanent():
 
 
 def test_no_test_deletes_other_group_resources():
-    import inspect
-    from fenix.services.demo import inject_fault
+    """Verifica estaticamente que inject_fault opere desde el inventario."""
     src = inspect.getsource(inject_fault)
     assert "inventory" in src
 
 
 def test_tested_functions_report():
-    from tests.notify_stub import register, TESTED_FUNCTIONS
-    for _fn in ("inject_fault", "notify", "signature", "verify"):
-        register(_fn)
+    """Verifica el registro de funciones trazadas por el stub."""
+    for fn_name in ("inject_fault", "notify", "signature", "verify"):
+        register(fn_name)
     assert "inject_fault" in TESTED_FUNCTIONS
     assert "notify" in TESTED_FUNCTIONS
